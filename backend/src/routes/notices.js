@@ -261,4 +261,22 @@ router.post("/:id/local-summary", async (req, res) => {
     });
   }
 });
+router.delete("/delete-all", (req, res) => {
+  try {
+    const result = db.prepare("DELETE FROM notices").run();
+
+    res.json({
+      success: true,
+      deletedCount: result.changes,
+    });
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
+
 module.exports = router;

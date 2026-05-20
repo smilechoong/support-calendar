@@ -53,6 +53,33 @@ export default function MainPage() {
     }
   };
 
+  const deleteAllNotices = async () => {
+    if (!window.confirm("정말 전체 공고를 삭제할까요?")) return;
+
+    try {
+      setLoading(true);
+      setMessage("전체 공고 삭제 중...");
+
+      const res = await fetch(`${API_BASE}/api/notices/delete-all`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.message || "전체 삭제 실패");
+      }
+
+      setNotices([]);
+      setMessage(`전체 공고 삭제 완료: ${data.deletedCount}건`);
+    } catch (err) {
+      console.error(err);
+      setMessage(`삭제 실패: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const crawlKStartup = async () => {
     try {
       setCrawlLoading(true);
@@ -300,6 +327,14 @@ export default function MainPage() {
             {crawlLoading && crawlSource === "msit"
               ? "수집 중..."
               : "과기정통부 수집"}
+          </button>
+
+          <button
+            style={styles.dangerButton}
+            onClick={deleteAllNotices}
+            disabled={loading || crawlLoading || notices.length === 0}
+          >
+            전체 삭제
           </button>
         </div>
       </header>
@@ -594,6 +629,15 @@ const styles = {
     padding: "11px 16px",
     background: "#fff",
     color: "#374151",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  dangerButton: {
+    border: 0,
+    borderRadius: "10px",
+    padding: "11px 16px",
+    background: "#dc2626",
+    color: "#fff",
     fontWeight: 700,
     cursor: "pointer",
   },
