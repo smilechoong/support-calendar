@@ -34,7 +34,7 @@ app.use(express.static(frontendDistPath));
 //
 // React SPA 처리
 //
-app.get("*", (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(frontendDistPath, "index.html"));
 });
 
