@@ -44,6 +44,7 @@ function makeMsitDetailUrl(nttId) {
 async function crawlMsit() {
   const browser = await puppeteer.launch({
     headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
@@ -111,8 +112,8 @@ async function crawlMsit() {
         title: cleanTitle,
         organization: "과학기술정보통신부",
         category: "사업공고",
-        start_date: null,
-        end_date: date,
+        start_date: date,
+        end_date: null,
         url: detailUrl,
         detail_url: detailUrl,
         status: "ongoing",

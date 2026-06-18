@@ -208,7 +208,9 @@ export default function MainPage() {
         return true;
       })
       .sort((a, b) =>
-        String(a.end_date || "").localeCompare(String(b.end_date || "")),
+        String(a.end_date || a.start_date || "").localeCompare(
+          String(b.end_date || b.start_date || ""),
+        ),
       );
   }, [
     notices,
@@ -221,21 +223,58 @@ export default function MainPage() {
     onlyUpcoming,
   ]);
 
-  const upcomingList = useMemo(() => {
+  const postedThisWeekList = useMemo(() => {
+    const now = new Date();
+
+    //
+    // 이번주 시작(월요일)
+    //
+    const startOfWeek = new Date(now);
+
+    const day = startOfWeek.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+
+    startOfWeek.setDate(startOfWeek.getDate() + diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    //
+    // 이번주 끝(일요일)
+    //
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(endOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    return filteredNotices
+      .filter((n) => {
+        if (!n.start_date) return false;
+
+        const start = new Date(n.start_date);
+
+        return start >= startOfWeek && start <= endOfWeek;
+      })
+      .sort((a, b) =>
+        String(a.start_date || "").localeCompare(String(b.start_date || "")),
+      );
+  }, [filteredNotices]);
+
+  const deadlineThisWeekList = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const limit = new Date(today);
     limit.setDate(limit.getDate() + 7);
 
-    return notices
+    return filteredNotices
       .filter((n) => {
         if (!n.end_date) return false;
         const end = new Date(n.end_date);
+        end.setHours(0, 0, 0, 0);
         return end >= today && end <= limit;
       })
-      .sort((a, b) => String(a.end_date).localeCompare(String(b.end_date)));
-  }, [notices]);
+      .sort((a, b) =>
+        String(a.end_date || "").localeCompare(String(b.end_date || "")),
+      );
+  }, [filteredNotices]);
 
   const groupedNoticesByMonth = useMemo(() => {
     const map = new Map();
@@ -258,13 +297,13 @@ export default function MainPage() {
     }));
   }, [filteredNotices]);
 
-  const events = useMemo(() => {
+  const calendarEvents = useMemo(() => {
     return filteredNotices
-      .filter((n) => n.end_date)
+      .filter((n) => n.start_date)
       .map((n) => ({
         id: String(n.id),
         title: `[${n.source}] ${n.title}`,
-        date: n.end_date,
+        date: n.start_date,
         extendedProps: n,
       }));
   }, [filteredNotices]);
@@ -296,7 +335,7 @@ export default function MainPage() {
         <div>
           <h1 style={styles.title}>정부지원사업 캘린더</h1>
           <p style={styles.subtitle}>
-            정부 · 지자체 · 기관 · 협회 공고를 마감일 기준으로 확인
+            정부 · 지자체 · 기관 · 협회 공고를 게시일/마감일 기준으로 확인
           </p>
         </div>
 
@@ -344,7 +383,14 @@ export default function MainPage() {
       <section style={styles.summaryGrid}>
         <SummaryCard label="전체 공고" value={`${notices.length}건`} />
         <SummaryCard label="필터 결과" value={`${filteredNotices.length}건`} />
-        <SummaryCard label="이번주 마감" value={`${upcomingList.length}건`} />
+        <SummaryCard
+          label="이번주 게시"
+          value={`${postedThisWeekList.length}건`}
+        />
+        <SummaryCard
+          label="이번주 마감"
+          value={`${deadlineThisWeekList.length}건`}
+        />
       </section>
 
       <section style={styles.filterCard}>
@@ -352,8 +398,8 @@ export default function MainPage() {
           <div>
             <h2 style={styles.sectionTitle}>검색 / 수집 필터</h2>
             <p style={styles.filterDesc}>
-              이 조건은 화면 조회뿐 아니라 수집 버튼 클릭 시 저장 전 필터에도
-              적용됩니다.
+              필터 조건은 화면 조회뿐 아니라 수집 버튼 클릭 시 저장 전 필터에도
+              적용됩니다. 날짜 필터는 마감일 기준입니다.
             </p>
           </div>
 
@@ -446,8 +492,8 @@ export default function MainPage() {
 
       <section style={styles.card}>
         <div style={styles.sectionHeader}>
-          <h2 style={styles.sectionTitle}>마감 캘린더</h2>
-          <span style={styles.helperText}>공고 클릭 시 원문으로 이동</span>
+          <h2 style={styles.sectionTitle}>공고 게시 캘린더</h2>
+          <span style={styles.helperText}>공고 게시일 기준</span>
         </div>
 
         <FullCalendar
@@ -456,7 +502,7 @@ export default function MainPage() {
           locales={[koLocale]}
           locale="ko"
           height="auto"
-          events={events}
+          events={calendarEvents}
           dayMaxEvents={3}
           moreLinkClick="popover"
           eventClick={(info) => {
@@ -470,12 +516,24 @@ export default function MainPage() {
 
       <section style={styles.card}>
         <div style={styles.sectionHeader}>
-          <h2 style={styles.sectionTitle}>이번주 마감 공고</h2>
-          <span style={styles.helperText}>오늘부터 7일 이내</span>
+          <h2 style={styles.sectionTitle}>이번주 게시 공고</h2>
+          <span style={styles.helperText}>오늘부터 7일 이내 게시 공고</span>
         </div>
 
         <NoticeTable
-          notices={upcomingList}
+          notices={postedThisWeekList}
+          emptyText="이번주 게시 공고가 없습니다."
+        />
+      </section>
+
+      <section style={styles.card}>
+        <div style={styles.sectionHeader}>
+          <h2 style={styles.sectionTitle}>이번주 마감 공고</h2>
+          <span style={styles.helperText}>오늘부터 7일 이내 마감 공고</span>
+        </div>
+
+        <NoticeTable
+          notices={deadlineThisWeekList}
           emptyText="이번주 마감 공고가 없습니다."
         />
       </section>
@@ -483,7 +541,7 @@ export default function MainPage() {
       <section style={styles.card}>
         <div style={styles.sectionHeader}>
           <h2 style={styles.sectionTitle}>월별 공고 리스트</h2>
-          <span style={styles.helperText}>필터 조건 기준 월별 그룹</span>
+          <span style={styles.helperText}>마감일 기준 월별 그룹</span>
         </div>
 
         <MonthlyNoticeList groupedNotices={groupedNoticesByMonth} />
@@ -535,6 +593,7 @@ function NoticeTable({ notices, emptyText }) {
       <table style={styles.table}>
         <thead>
           <tr>
+            <th style={styles.th}>게시일</th>
             <th style={styles.th}>마감일</th>
             <th style={styles.th}>분야</th>
             <th style={styles.th}>공고명</th>
@@ -549,6 +608,7 @@ function NoticeTable({ notices, emptyText }) {
 
             return (
               <tr key={n.id} style={styles.tr}>
+                <td style={styles.tdPostDate}>{n.start_date || "-"}</td>
                 <td style={styles.tdDate}>{n.end_date || "-"}</td>
                 <td style={styles.td}>{n.category || "-"}</td>
                 <td style={styles.tdTitle}>
@@ -586,7 +646,10 @@ function formatMonthTitle(month) {
 const styles = {
   page: {
     minHeight: "100vh",
-    padding: "28px",
+    width: "100%",
+    maxWidth: "1600px",
+    margin: "0 auto",
+    padding: "24px",
     background: "#f5f7fb",
     color: "#1f2937",
     boxSizing: "border-box",
@@ -597,6 +660,7 @@ const styles = {
     alignItems: "flex-start",
     gap: "20px",
     marginBottom: "18px",
+    flexWrap: "wrap",
   },
   title: {
     margin: 0,
@@ -612,7 +676,6 @@ const styles = {
     display: "flex",
     gap: "10px",
     flexWrap: "wrap",
-    justifyContent: "flex-end",
   },
   primaryButton: {
     border: 0,
@@ -651,7 +714,7 @@ const styles = {
   },
   summaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
     gap: "14px",
     marginBottom: "18px",
   },
@@ -691,7 +754,7 @@ const styles = {
   },
   filterGrid: {
     display: "grid",
-    gridTemplateColumns: "2fr 2fr 1fr 1fr 1fr 1fr auto",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
     gap: "12px",
     alignItems: "end",
   },
@@ -715,7 +778,7 @@ const styles = {
     background: "#fff",
   },
   checkboxWrap: {
-    height: "42px",
+    minHeight: "42px",
     display: "flex",
     alignItems: "center",
     gap: "8px",
@@ -723,6 +786,7 @@ const styles = {
     fontWeight: 700,
     color: "#374151",
     whiteSpace: "nowrap",
+    paddingTop: "22px",
   },
   resetButton: {
     border: "1px solid #d1d5db",
@@ -740,6 +804,7 @@ const styles = {
     padding: "20px",
     marginBottom: "20px",
     boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+    overflow: "hidden",
   },
   sectionHeader: {
     display: "flex",
@@ -815,6 +880,13 @@ const styles = {
     color: "#374151",
     whiteSpace: "nowrap",
   },
+  tdPostDate: {
+    padding: "12px",
+    verticalAlign: "top",
+    fontWeight: 800,
+    color: "#2563eb",
+    whiteSpace: "nowrap",
+  },
   tdDate: {
     padding: "12px",
     verticalAlign: "top",
@@ -825,7 +897,7 @@ const styles = {
   tdTitle: {
     padding: "12px",
     verticalAlign: "top",
-    minWidth: "360px",
+    minWidth: "240px",
   },
   link: {
     color: "#1d4ed8",
