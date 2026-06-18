@@ -2,8 +2,11 @@ const express = require("express");
 const router = express.Router();
 
 const { db } = require("../db");
-const { crawlKStartup } = require("../crawlers/kstartupCrawler");
-const { crawlMsit } = require("../crawlers/msitCrawler");
+const {
+  getPublicSources,
+  getReadySources,
+  getSource,
+} = require("../services/sourceRegistry");
 
 function normalizeText(value) {
   return String(value || "")
@@ -122,6 +125,12 @@ function saveNotices(notices) {
 
   const insertMany = db.transaction((items) => {
     for (const item of items) {
+      if (!item.end_date) {
+        db.prepare(
+          `DELETE FROM notices
+           WHERE source = ? AND title = ? AND end_date IS NULL`,
+        ).run(item.source, item.title);
+      }
       stmt.run(item);
     }
   });
@@ -129,55 +138,83 @@ function saveNotices(notices) {
   insertMany(notices);
 }
 
-router.post("/k-startup", async (req, res) => {
-  try {
-    const rawNotices = await crawlKStartup();
-    const filteredNotices = applyCrawlFilters(rawNotices, req.body);
-
-    saveNotices(filteredNotices);
-
-    res.json({
-      success: true,
-      source: "K-Startup",
-      totalCount: rawNotices.length,
-      savedCount: filteredNotices.length,
-      count: filteredNotices.length,
-    });
-  } catch (err) {
-    console.error(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
+router.get("/sources", (req, res) => {
+  const sources = getPublicSources();
+  res.json({
+    success: true,
+    sources,
+    totalCount: sources.length,
+    readyCount: sources.filter((source) => source.ready).length,
+  });
 });
 
-router.post("/msit", async (req, res) => {
-  try {
-    const rawNotices = await crawlMsit();
-    const filteredNotices = applyCrawlFilters(rawNotices, req.body);
+async function collect(source, filters) {
+  const rawNotices = await source.collect();
+  const filteredNotices = applyCrawlFilters(rawNotices, filters);
+  saveNotices(filteredNotices);
+  return {
+    id: source.id,
+    source: source.name,
+    totalCount: rawNotices.length,
+    savedCount: filteredNotices.length,
+  };
+}
 
-    console.log("[MSIT] 전체 수집 개수:", rawNotices.length);
-    console.log("[MSIT] 필터 후 저장 개수:", filteredNotices.length);
-    console.log("[MSIT] 첫 번째:", filteredNotices[0]);
+router.post("/all", async (req, res) => {
+  const results = [];
 
-    saveNotices(filteredNotices);
+  for (const source of getReadySources()) {
+    try {
+      results.push({ success: true, ...(await collect(source, req.body)) });
+    } catch (err) {
+      console.error(`[CRAWL][${source.id}]`, err);
+      results.push({
+        success: false,
+        id: source.id,
+        source: source.name,
+        message: err.message,
+      });
+    }
+  }
 
-    res.json({
-      success: true,
-      source: "과기정통부",
-      totalCount: rawNotices.length,
-      savedCount: filteredNotices.length,
-      count: filteredNotices.length,
-    });
-  } catch (err) {
-    console.error(err);
+  res.json({
+    success: results.some((result) => result.success),
+    results,
+    totalCount: results.reduce(
+      (sum, result) => sum + (result.totalCount || 0),
+      0,
+    ),
+    savedCount: results.reduce(
+      (sum, result) => sum + (result.savedCount || 0),
+      0,
+    ),
+    failedCount: results.filter((result) => !result.success).length,
+  });
+});
 
-    res.status(500).json({
+router.post("/:sourceId", async (req, res) => {
+  const source = getSource(req.params.sourceId);
+
+  if (!source) {
+    return res.status(404).json({
       success: false,
-      message: err.message,
+      message: "수집 대상을 찾을 수 없습니다.",
     });
+  }
+
+  if (!source.ready || !source.collect) {
+    return res.status(409).json({
+      success: false,
+      message: source.statusMessage,
+      source: source.name,
+    });
+  }
+
+  try {
+    res.json({ success: true, ...(await collect(source, req.body)) });
+  } catch (err) {
+    console.error(`[CRAWL][${source.id}]`, err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

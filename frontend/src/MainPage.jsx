@@ -11,6 +11,8 @@ export default function MainPage() {
   const [loading, setLoading] = useState(false);
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlSource, setCrawlSource] = useState("");
+  const [crawlSources, setCrawlSources] = useState([]);
+  const [selectedCrawlSource, setSelectedCrawlSource] = useState("");
   const [message, setMessage] = useState("");
 
   const [keyword, setKeyword] = useState("");
@@ -80,46 +82,37 @@ export default function MainPage() {
     }
   };
 
-  const crawlKStartup = async () => {
+  const loadCrawlSources = async () => {
     try {
-      setCrawlLoading(true);
-      setCrawlSource("kstartup");
-      setMessage("K-Startup 공고 수집 중...");
-
-      const res = await fetch(`${API_BASE}/api/crawl/k-startup`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(makeCrawlFilterPayload()),
-      });
-
+      const res = await fetch(`${API_BASE}/api/crawl/sources`);
       const data = await res.json();
-
       if (!data.success) {
-        throw new Error(data.message || "수집 실패");
+        throw new Error(data.message || "수집 대상 조회 실패");
       }
-
-      setMessage(
-        `K-Startup 수집 완료: ${data.savedCount}건 저장 / ${data.totalCount}건 수집`,
+      const sources = data.sources || [];
+      setCrawlSources(sources);
+      setSelectedCrawlSource(
+        (current) => current || sources.find((source) => source.ready)?.id || "",
       );
-      await loadNotices();
     } catch (err) {
       console.error(err);
-      setMessage(`수집 실패: ${err.message}`);
-    } finally {
-      setCrawlLoading(false);
-      setCrawlSource("");
+      setMessage(`수집 대상 조회 실패: ${err.message}`);
     }
   };
 
-  const crawlMsit = async () => {
+  const runCrawl = async (sourceId) => {
+    const source = crawlSources.find((item) => item.id === sourceId);
+
     try {
       setCrawlLoading(true);
-      setCrawlSource("msit");
-      setMessage("과기정통부 공고 수집 중...");
+      setCrawlSource(sourceId);
+      setMessage(
+        sourceId === "all"
+          ? "연동된 전체 기관 수집 중..."
+          : `${source?.name || "선택 기관"} 공고 수집 중...`,
+      );
 
-      const res = await fetch(`${API_BASE}/api/crawl/msit`, {
+      const res = await fetch(`${API_BASE}/api/crawl/${sourceId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -133,10 +126,12 @@ export default function MainPage() {
         throw new Error(data.message || "수집 실패");
       }
 
-      setMessage(
-        `과기정통부 수집 완료: ${data.savedCount}건 저장 / ${data.totalCount}건 수집`,
-      );
       await loadNotices();
+      setMessage(
+        sourceId === "all"
+          ? `전체 수집 완료: ${data.savedCount}건 저장 / ${data.totalCount}건 수집 / 실패 ${data.failedCount}개 기관`
+          : `${source?.name || data.source} 수집 완료: ${data.savedCount}건 저장 / ${data.totalCount}건 수집`,
+      );
     } catch (err) {
       console.error(err);
       setMessage(`수집 실패: ${err.message}`);
@@ -148,7 +143,13 @@ export default function MainPage() {
 
   useEffect(() => {
     loadNotices();
+    loadCrawlSources();
   }, []);
+
+  const selectedSource = crawlSources.find(
+    (source) => source.id === selectedCrawlSource,
+  );
+  const readySourceCount = crawlSources.filter((source) => source.ready).length;
 
   const sourceOptions = useMemo(() => {
     const sources = [...new Set(notices.map((n) => n.source).filter(Boolean))];
@@ -348,24 +349,40 @@ export default function MainPage() {
             {loading ? "조회 중..." : "새로고침"}
           </button>
 
+          <select
+            style={styles.sourceSelect}
+            value={selectedCrawlSource}
+            onChange={(event) => setSelectedCrawlSource(event.target.value)}
+            disabled={loading || crawlLoading}
+            title={selectedSource?.statusMessage || "수집 대상을 선택하세요"}
+          >
+            {crawlSources.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.ready ? "[연동] " : "[설정 필요] "}
+                {source.name}
+              </option>
+            ))}
+          </select>
+
           <button
             style={styles.primaryButton}
-            onClick={crawlKStartup}
-            disabled={loading || crawlLoading}
+            onClick={() => runCrawl(selectedCrawlSource)}
+            disabled={loading || crawlLoading || !selectedSource?.ready}
+            title={selectedSource?.statusMessage}
           >
-            {crawlLoading && crawlSource === "kstartup"
+            {crawlLoading && crawlSource === selectedCrawlSource
               ? "수집 중..."
-              : "K-Startup 수집"}
+              : "선택 수집"}
           </button>
 
           <button
             style={styles.primaryButton}
-            onClick={crawlMsit}
-            disabled={loading || crawlLoading}
+            onClick={() => runCrawl("all")}
+            disabled={loading || crawlLoading || readySourceCount === 0}
           >
-            {crawlLoading && crawlSource === "msit"
-              ? "수집 중..."
-              : "과기정통부 수집"}
+            {crawlLoading && crawlSource === "all"
+              ? "전체 수집 중..."
+              : `연동 전체 수집 (${readySourceCount})`}
           </button>
 
           <button
@@ -379,6 +396,20 @@ export default function MainPage() {
       </header>
 
       {message && <div style={styles.message}>{message}</div>}
+
+      {selectedSource && !selectedSource.ready && (
+        <div style={styles.sourceNotice}>
+          <strong>{selectedSource.name}</strong>: {selectedSource.statusMessage}
+          <a
+            href={selectedSource.listUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={styles.sourceLink}
+          >
+            공고 목록 열기
+          </a>
+        </div>
+      )}
 
       <section style={styles.summaryGrid}>
         <SummaryCard label="전체 공고" value={`${notices.length}건`} />
@@ -677,6 +708,17 @@ const styles = {
     gap: "10px",
     flexWrap: "wrap",
   },
+  sourceSelect: {
+    minWidth: "280px",
+    maxWidth: "420px",
+    height: "44px",
+    border: "1px solid #94a3b8",
+    borderRadius: "8px",
+    padding: "0 36px 0 12px",
+    background: "#fff",
+    color: "#1f2937",
+    fontWeight: 700,
+  },
   primaryButton: {
     border: 0,
     borderRadius: "10px",
@@ -711,6 +753,23 @@ const styles = {
     background: "#eef2ff",
     color: "#3730a3",
     fontWeight: 600,
+  },
+  sourceNotice: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+    marginBottom: "16px",
+    padding: "12px 14px",
+    border: "1px solid #f59e0b",
+    borderRadius: "8px",
+    background: "#fffbeb",
+    color: "#92400e",
+    fontSize: "14px",
+  },
+  sourceLink: {
+    color: "#1d4ed8",
+    fontWeight: 700,
   },
   summaryGrid: {
     display: "grid",
